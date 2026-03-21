@@ -87,14 +87,19 @@ def get_cpu_usage():
 
 
 def get_gpu_usage():
-    GPU = 0.0
-    try:
-        with open("/sys/devices/gpu.0/load", encoding="utf-8") as gpu_file:
-            GPU = gpu_file.readline()
-            GPU = int(GPU) / 10
-    except (FileNotFoundError, IOError):
-        pass
-    return GPU
+    # JP4: /sys/devices/gpu.0/load
+    # JP6 (Orin Nano): /sys/devices/platform/bus@0/17000000.gpu/load
+    candidates = [
+        "/sys/devices/gpu.0/load",
+        "/sys/devices/platform/bus@0/17000000.gpu/load",
+    ]
+    for path in candidates:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return int(f.readline()) / 10
+        except (FileNotFoundError, IOError):
+            continue
+    return 0.0
 
 
 # I2C 초기화 (JP6: busio 사용, 구버전 gpio 핵 불필요)
@@ -118,15 +123,15 @@ draw = ImageDraw.Draw(image)
 draw.rectangle((0, 0, width, height), outline=0, fill=0)
 
 # Draw some shapes.
-# First define some constants to allow easy resizing of shapes.
-padding = -2
+# 128x32 디스플레이 기준: 4줄 × 8px = 32px 딱 맞게 배치
+padding = 0
 top = padding
 bottom = height - padding
-# Move left to right keeping track of the current x position for drawing shapes.
 x = 0
 
-# Load default font.
-font = ImageFont.load_default()
+# Pillow >= 10.0: load_default(size=8)로 8px 비트맵 폰트 지정
+# 32px 높이에 4줄(0/8/16/24)이 잘림 없이 들어가도록 맞춤
+font = ImageFont.load_default(size=8)
 
 while True:
 
@@ -156,14 +161,14 @@ while True:
     if gpu_usage == 0.0:
         gpu_usage = 0.001
     draw_bar_width = int(full_bar_width * (gpu_usage / 100))
-    draw.text((x, top + 8),     "GPU:  ", font=font, fill=255)
-    draw.rectangle((x + string_width, top + 12, x + string_width +
-                    draw_bar_width, top + 14), outline=1, fill=1)
+    draw.text((x, top + 8), "GPU:  ", font=font, fill=255)
+    draw.rectangle((x + string_width, top + 11, x + string_width +
+                    draw_bar_width, top + 13), outline=1, fill=1)
 
     # Show the memory Usage
     draw.text((x, top + 16), str(MemUsage.decode('utf-8')), font=font, fill=255)
     # Show the amount of disk being used
-    draw.text((x, top + 25), str(Disk.decode('utf-8')), font=font, fill=255)
+    draw.text((x, top + 24), str(Disk.decode('utf-8')), font=font, fill=255)
 
     # Display image.
     # Set the SSD1306 image to the PIL image we have made, then display
