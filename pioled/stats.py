@@ -27,6 +27,8 @@
 #   - Pillow >= 10.0: font.getsize() 제거 → font.getlength() 사용
 #   - I2C 초기화: busio.I2C(board.SCL, board.SDA)
 
+import os
+import subprocess
 import time
 
 import board
@@ -37,8 +39,7 @@ from PIL import Image
 from PIL import ImageDraw
 from PIL import ImageFont
 
-import os
-import subprocess
+from pioled.alerts import alert_state
 
 
 def get_gpu_usage():
@@ -144,6 +145,9 @@ while True:
         disk = 0
     temp = get_temp_c()
     temp_str = "{:.0f}°".format(temp) if temp is not None else "--°"
+
+    if alert_state is not None:
+        alert_state.update(temp)
 
     # Row 1: GPU | MEM
     draw.text((LEFT_X, ROW_Y[0]),  "GPU {:.0f}%".format(gpu),  font=font, fill=255)
