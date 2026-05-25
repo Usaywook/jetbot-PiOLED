@@ -9,6 +9,8 @@ Env vars (see ``.env.example``):
 - ``TEMP_ALERT_C``           threshold in °C (default 80)
 - ``TEMP_ALERT_SUSTAIN_S``   seconds above threshold before [ALERT] (default 30)
 - ``TEMP_CLEAR_SUSTAIN_S``   seconds below threshold before [OK]    (default 60)
+- ``TEMP_ALERT_REPEAT_S``    while still above threshold, re-send every N s
+                             (default 0 = single alert, no repeats)
 """
 
 import json
@@ -59,15 +61,18 @@ class AlertState:
     """Hysteresis state machine: only alerts after sustained crossing in each
     direction, so brief spikes near the threshold don't spam the channel."""
 
-    def __init__(self, webhook_url, threshold, sustain_s, clear_s, hostname):
+    def __init__(self, webhook_url, threshold, sustain_s, clear_s, repeat_s,
+                 hostname):
         self.webhook_url = webhook_url
         self.threshold = threshold
         self.sustain_s = sustain_s
         self.clear_s = clear_s
+        self.repeat_s = repeat_s
         self.hostname = hostname
         self.alerting = False
         self.crossed_up_at = None
         self.crossed_down_at = None
+        self.last_alert_at = None
 
     def update(self, temp):
         if temp is None:
@@ -80,6 +85,7 @@ class AlertState:
                 elif now - self.crossed_up_at >= self.sustain_s:
                     self.alerting = True
                     self.crossed_up_at = None
+                    self.last_alert_at = now
                     post_slack(
                         self.webhook_url,
                         "[ALERT] {host}: temp {t:.1f}°C >= threshold {thr:.0f}°C "
@@ -97,6 +103,7 @@ class AlertState:
                 elif now - self.crossed_down_at >= self.clear_s:
                     self.alerting = False
                     self.crossed_down_at = None
+                    self.last_alert_at = None
                     post_slack(
                         self.webhook_url,
                         "[OK] {host}: temp {t:.1f}°C < threshold {thr:.0f}°C "
@@ -107,6 +114,18 @@ class AlertState:
                     )
             else:
                 self.crossed_down_at = None
+                if (self.repeat_s > 0
+                        and self.last_alert_at is not None
+                        and now - self.last_alert_at >= self.repeat_s):
+                    self.last_alert_at = now
+                    post_slack(
+                        self.webhook_url,
+                        "[ALERT-REPEAT] {host}: temp {t:.1f}°C still >= "
+                        "threshold {thr:.0f}°C (every {r:.0f}s)".format(
+                            host=self.hostname, t=temp,
+                            thr=self.threshold, r=self.repeat_s,
+                        ),
+                    )
 
 
 def _build_from_env():
@@ -118,10 +137,14 @@ def _build_from_env():
     threshold = _env_float("TEMP_ALERT_C", 80.0)
     sustain_s = _env_float("TEMP_ALERT_SUSTAIN_S", 30.0)
     clear_s = _env_float("TEMP_CLEAR_SUSTAIN_S", 60.0)
+    repeat_s = _env_float("TEMP_ALERT_REPEAT_S", 0.0)
+    repeat_label = "{:.0f}s".format(repeat_s) if repeat_s > 0 else "off"
     print("[INFO] Slack alerts ON — threshold {:.0f}°C, sustain {:.0f}s, "
-          "clear {:.0f}s".format(threshold, sustain_s, clear_s),
+          "clear {:.0f}s, repeat {}".format(
+              threshold, sustain_s, clear_s, repeat_label),
           file=sys.stderr)
-    return AlertState(webhook, threshold, sustain_s, clear_s, socket.gethostname())
+    return AlertState(webhook, threshold, sustain_s, clear_s, repeat_s,
+                      socket.gethostname())
 
 
 alert_state = _build_from_env()
